@@ -1,0 +1,104 @@
+﻿@page "/"
+
+@rendermode InteractiveWebAssembly
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Chat</PageTitle>
+
+<div class="alert alert-info" role="alert">
+    Fill in the fields and submit, then open another tab, fill in the fields again, and submit to trigger a notification message
+</div>
+
+@* Name *@
+<div class="mb-3">
+    <label class="form-label">You are</label>
+    <input @bind="userInput" type="text" disabled class="form-control">
+</div>
+
+@* Message *@
+<div class="mb-3">
+    <label class="form-label">Message</label>
+    <textarea @bind="messageInput" class="form-control" rows="3"></textarea>
+</div>
+
+@* Submit button *@
+<button type="button" class="btn btn-primary mb-3" @onclick="SendMessage" disabled="@(!IsConnected)">Send Message</button>
+
+
+@* Message List *@
+<div id="messagesList mt-2">
+    @foreach (var message in messages.AsEnumerable().Reverse())
+    {
+        <div class="alert alert-primary" role="alert">
+            @message
+        </div>
+    }
+</div>
+
+@code {
+    private HubConnection? hubConnection;
+    private List<string> messages = new List<string>();
+
+    private string userInput = string.Empty;
+    private string messageInput = string.Empty;
+
+
+    [Inject] private AuthenticationStateProvider? AuthenticationStateProvider { get; set; }
+
+    // Initialize hub
+    protected override async Task OnInitializedAsync()
+
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+
+        if (user.Identity.IsAuthenticated)
+        {
+            userInput = user.Identity.Name;
+            // You can access other claims as well
+            // var email = user.FindFirst(c => c.Type == ClaimTypes.Email)?.Value;
+        }
+        else
+        {
+            userInput = "Anonymous";
+        }
+
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/chathub"))
+            .Build();
+
+        hubConnection.On<string, string>("SuccessSendMessage", (user, message) =>
+        {
+            var encodedMsg = $"{user}: {message}";
+            messages.Add(encodedMsg);
+            InvokeAsync(StateHasChanged);
+        });
+
+        await hubConnection.StartAsync();
+
+    }
+
+    // Send Message
+    private async Task SendMessage()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.SendAsync("SendMessage", userInput, messageInput);
+            messageInput = string.Empty;
+        }
+    }
+
+    public bool IsConnected =>
+        hubConnection?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}
