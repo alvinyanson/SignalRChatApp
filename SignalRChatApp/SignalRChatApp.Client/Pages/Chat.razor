@@ -1,69 +1,69 @@
 ﻿@page "/"
 
-@rendermode InteractiveWebAssembly
 @using Microsoft.AspNetCore.SignalR.Client
+
+@rendermode InteractiveWebAssembly
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @implements IAsyncDisposable
 
 <PageTitle>Chat</PageTitle>
 
 <div class="alert alert-info" role="alert">
-    Fill in the fields and submit, then open another tab, fill in the fields again, and submit to trigger a notification message
+    <h3>Public Chat</h3> Fill in the fields and submit, then open another tab, fill in the fields again, and submit to trigger a notification message
 </div>
 
 @* Name *@
 <div class="mb-3">
     <label class="form-label">You are</label>
-    <input @bind="userInput" type="text" disabled class="form-control">
+    <input @bind="loggedInUser" type="text" disabled class="form-control">
 </div>
-
-@* Message *@
-<div class="mb-3">
-    <label class="form-label">Message</label>
-    <textarea @bind="messageInput" class="form-control" rows="3"></textarea>
-</div>
-
-@* Submit button *@
-<button type="button" class="btn btn-primary mb-3" @onclick="SendMessage" disabled="@(!IsConnected)">Send Message</button>
-
 
 @* Message List *@
-<div id="messagesList mt-2">
-    @foreach (var message in messages.AsEnumerable().Reverse())
-    {
-        <div class="alert alert-primary" role="alert">
-            @message
-        </div>
-    }
+<textarea style="width: 100%; height: 500px;" @ref="TextAreaRef">
+    @messages
+</textarea>
+
+@* Message and submit button *@
+<div class="input-group">
+    <input @bind-value="messageInput"
+           @bind-value:event="oninput"
+           @onkeyup="HandleInput"
+           placeholder="Enter message..."
+           class="form-control">
+
+    <button class="btn btn-primary form-group-append"
+            @onclick="SendMessage"
+            disabled="@(!IsConnected)">
+        Send
+    </button>
 </div>
 
 @code {
     private HubConnection? hubConnection;
-    private List<string> messages = new List<string>();
 
-    private string userInput = string.Empty;
-    private string messageInput = string.Empty;
+    private string? messages;
+    private string? messageInput;
+    private string loggedInUser = "Anonymous";
 
+    ElementReference TextAreaRef;
 
     [Inject] private AuthenticationStateProvider? AuthenticationStateProvider { get; set; }
 
     // Initialize hub
     protected override async Task OnInitializedAsync()
-
     {
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
 
-
-        if (user.Identity.IsAuthenticated)
+        if(user is not null && user.Identity is not null)
         {
-            userInput = user.Identity.Name;
-            // You can access other claims as well
-            // var email = user.FindFirst(c => c.Type == ClaimTypes.Email)?.Value;
-        }
-        else
-        {
-            userInput = "Anonymous";
+            if (user.Identity.IsAuthenticated)
+            {
+                loggedInUser = user.Identity.Name!;
+                // You can access other claims as well
+                // var email = user.FindFirst(c => c.Type == ClaimTypes.Email)?.Value;
+            }
         }
 
         hubConnection = new HubConnectionBuilder()
@@ -72,22 +72,32 @@
 
         hubConnection.On<string, string>("SuccessSendMessage", (user, message) =>
         {
-            var encodedMsg = $"{user}: {message}";
-            messages.Add(encodedMsg);
+            var msg = $"{(string.IsNullOrEmpty(user) ? "" : user + ": ")}{message}";
+            
+            messages += msg + "\n";
+            JSRuntime.InvokeVoidAsync("scrollToBottom", TextAreaRef);
+
             InvokeAsync(StateHasChanged);
         });
 
         await hubConnection.StartAsync();
-
     }
 
     // Send Message
     private async Task SendMessage()
     {
-        if (hubConnection is not null)
+        if (hubConnection is not null && !string.IsNullOrEmpty(messageInput))
         {
-            await hubConnection.SendAsync("SendMessage", userInput, messageInput);
+            await hubConnection.SendAsync("SendMessage", loggedInUser, messageInput);
             messageInput = string.Empty;
+        }
+    }
+
+    private async Task HandleInput(KeyboardEventArgs args)
+    {
+        if (args.Key.Equals("Enter"))
+        {
+            await SendMessage();
         }
     }
 

@@ -20,16 +20,16 @@ namespace BlazorSignalRChatApp.Hubs
             await Clients.All.SuccessSendMessage(user, message);
         }
 
-        public async Task JoinGroup(string groupName)
+        public async Task JoinGroup(string groupName, string user)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
 
-            await Clients.Group(groupName).SuccessSendMessage(Context.ConnectionId, $"joined the {groupName}!");
+            await Clients.OthersInGroup(groupName).SuccessSendMessage(user, $"joined the {groupName}!");
         }
 
-        public async Task SendMessageToGroup(string groupName, string message)
+        public async Task SendMessageToGroup(string groupName, string user, string message)
         {
-            await Clients.Group(groupName).SuccessSendMessage(Context.ConnectionId, $"{message}");
+            await Clients.Group(groupName).SuccessSendMessage(user, $"{message}");
         }
     }
 }

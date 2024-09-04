@@ -1,15 +1,14 @@
 ﻿@page "/groups"
 
-@rendermode InteractiveWebAssembly
 @using Microsoft.AspNetCore.SignalR.Client
+
+@rendermode InteractiveWebAssembly
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @implements IAsyncDisposable
 
-
-<h3>Groups</h3>
-
 <div class="alert alert-info" role="alert">
-    Choose a group, then open another tab and select the same group to trigger a notification message.
+    <h3>Groups</h3> Choose a group, then open another tab and select the same group to trigger a notification message.
 </div>
 
 <div class="row mb-3">
@@ -28,46 +27,76 @@
 
 @if (!string.IsNullOrEmpty(groupName))
 {
+    @* Name *@
     <div class="mb-3">
-        <label class="form-label">Send Message to group <b>@groupName</b></label>
-        <textarea @bind="messageInput" class="form-control" rows="3"></textarea>
+        <label class="form-label">You are</label>
+        <input @bind="loggedInUser" type="text" disabled class="form-control">
     </div>
 
-    <button type="button" class="btn btn-primary mb-3" @onclick="SendMessageToGroup" disabled="@(!IsConnected)">Send Message</button>
+    @* Message List *@
+    <textarea style="width: 100%; height: 400px;" @ref="TextAreaRef">
+        @messages
+    </textarea>
+
+
+    @* Message and submit button *@
+    <div class="input-group">
+        <input @bind-value="messageInput"
+               @bind-value:event="oninput"
+               @onkeyup="HandleInput"
+               placeholder="Enter message for @groupName..."
+               class="form-control">
+
+        <button class="btn btn-primary form-group-append"
+                @onclick="SendMessageToGroup"
+                disabled="@(!IsConnected)">
+            Send
+        </button>
+    </div>
 }
 
-<div id="messagesList mt-2">
-    @foreach (var message in messages.AsEnumerable().Reverse())
-    {
-        <div class="alert alert-primary" role="alert">
-            @message
-        </div>
-    }
-</div>
 
 @code {
 
     private HubConnection? hubConnection;
-
-
     private List<string> groups = new List<string>() { "Group 1", "Group 2", "Group 3", "Group 4" };
-    private List<string> messages = new List<string>();
+    
+    private string? messages;
     private string? groupName;
-
     private string? messageInput;
+    private string loggedInUser = "Anonymous";
+
+    ElementReference TextAreaRef;
+
+    [Inject] private AuthenticationStateProvider? AuthenticationStateProvider { get; set; }
+
 
     // Initialize hub
     protected override async Task OnInitializedAsync()
-
     {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user is not null && user.Identity is not null)
+        {
+            if (user.Identity.IsAuthenticated)
+            {
+                loggedInUser = user.Identity.Name!;
+            }
+        }
+
+
         hubConnection = new HubConnectionBuilder()
             .WithUrl(Navigation.ToAbsoluteUri("/chathub"))
             .Build();
 
         hubConnection.On<string, string>("SuccessSendMessage", (user, message) =>
         {
-            var encodedMsg = $"{user}: {message}";
-            messages.Add(encodedMsg);
+            var msg = $"{(string.IsNullOrEmpty(user) ? "" : user + ": ")}{message}";
+            
+            messages += msg + "\n";
+            JSRuntime.InvokeVoidAsync("scrollToBottom", TextAreaRef);
+            
             InvokeAsync(StateHasChanged);
         });
 
@@ -80,17 +109,28 @@
         if (hubConnection is not null && selectedGroupName != string.Empty)
         {
             groupName = selectedGroupName;
-            await hubConnection.SendAsync("JoinGroup", selectedGroupName);
+
+            await hubConnection.SendAsync("JoinGroup", selectedGroupName, loggedInUser);
+            
+            messages = string.Empty;
         }
     }
 
     // Send Message To Group
     private async Task SendMessageToGroup()
     {
-        if (hubConnection is not null)
+        if (hubConnection is not null && !string.IsNullOrEmpty(messageInput))
         {
-            await hubConnection.SendAsync("SendMessageToGroup", groupName, messageInput);
+            await hubConnection.SendAsync("SendMessageToGroup", groupName, loggedInUser, messageInput);
             messageInput = string.Empty;
+        }
+    }
+
+    private async Task HandleInput(KeyboardEventArgs args)
+    {
+        if (args.Key.Equals("Enter"))
+        {
+            await SendMessageToGroup();
         }
     }
 
